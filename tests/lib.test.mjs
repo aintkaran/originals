@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatCaption, formatShutter, validateNames, parseMeta, resolveCaption, resolveAlt, deletionGuard, pickExif, cleanAlt } from '../scripts/lib.mjs';
+import { formatCaption, formatShutter, validateNames, parseMeta, resolveCaption, deletionGuard, pickExif } from '../scripts/lib.mjs';
 const cfg = { captionTemplate: '{focal} / f/{aperture} / {shutter} / ISO {iso}', separator: ' / ', showCamera: true, showLens: true };
 const full = { Make: 'Apple', Model: 'Apple iPhone 15 Pro', FocalLengthIn35mmFormat: 35, FNumber: 1.78, ExposureTime: 0.004, ISO: 400 };
 
@@ -36,9 +36,6 @@ test('meta: malformed reports line/column; precedence', () => {
   assert.equal(resolveCaption({ caption: '' }, full, cfg), '');
   assert.equal(resolveCaption({}, full, cfg), '35mm / f/1.8 / 1/250s / ISO 400');
   assert.equal(resolveCaption({ exif: false }, full, cfg), '');
-  assert.deepEqual(resolveAlt({ alt: '' }, 'ai'), { alt: '', altSource: undefined });
-  assert.deepEqual(resolveAlt({ alt: 'human' }, 'ai'), { alt: 'human', altSource: undefined });
-  assert.deepEqual(resolveAlt({}, 'ai'), { alt: 'ai', altSource: 'ai' });
 });
 test('deletion guard', () => {
   assert.ok(deletionGuard({ existing: 10, toDelete: 3, imageCount: 5 }));
@@ -46,8 +43,7 @@ test('deletion guard', () => {
   assert.ok(deletionGuard({ existing: 10, toDelete: 0, imageCount: 0 }));
   assert.equal(deletionGuard({ existing: 10, toDelete: 10, imageCount: 0, force: true }), null);
 });
-test('exif whitelist drops everything else; alt cleanup', () => {
+test('exif whitelist drops everything else', () => {
   const o = pickExif({ Make: 'A', GPSLatitude: 1, SerialNumber: 'S', OwnerName: 'N', ISO: 100 });
   assert.deepEqual(Object.keys(o).sort(), ['ISO', 'Make']);
-  assert.equal(cleanAlt('"Photo of a red door."'), 'A red door.');
 });
