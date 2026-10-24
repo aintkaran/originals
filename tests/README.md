@@ -1,2 +1,6 @@
 # Tests
-`npm test` runs `tests/lib.test.mjs` (caption formatter, name validators, meta precedence, deletion guard, EXIF whitelist) and `tests/e2e.test.mjs`, which builds fixtures (JPEG with EXIF and GPS, PNG, a Display P3 image, a 1000 px image, an EXIF-orientation-6 portrait, a 300 px image) and checks: only 600 px made for the 1000 px file, tiny files skipped, no EXIF/GPS in outputs, manifest or state, a second run changes nothing, a meta.json-only edit does not touch images, deleting a source removes its exports, and an empty originals folder aborts.
+
+`npm test` runs the pipeline's checks, and the GitHub Action runs them before every sync - a failing test stops the publish.
+
+- `tests/lib.test.mjs` - unit tests for the pure helpers: the caption formatter, name validators, meta.json parsing and precedence, the deletion guard and the EXIF whitelist.
+- `tests/e2e.test.mjs` - an end-to-end run over generated fixtures (a JPEG with EXIF and GPS, a plain PNG, a Display P3 image, a 1000 px image, an EXIF-orientation-6 portrait, a 300 px image). It checks that the 1000 px original yields only the 600 px export, tiny files are skipped, no EXIF/GPS/ICC leaks into outputs, the manifest or the state, a second run changes nothing, a meta.json-only edit leaves images untouched, deleting a source removes its exports, and an empty originals folder aborts the run.
