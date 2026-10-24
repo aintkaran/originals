@@ -10,7 +10,7 @@ import { exiftool } from 'exiftool-vendored';
 import encodeJxl, { init as initJxl } from '@jsquash/jxl/encode.js';
 import {
   WIDTHS, IMAGE_EXT_RE, parseMeta, metaImageMap, validateNames, pickExif,
-  resolveCaption, resolveAlt, deletionGuard, cleanAlt
+  resolveCaption, deletionGuard
 } from './lib.mjs';
 
 const args = process.argv.slice(2);
@@ -23,7 +23,6 @@ const TARGET = path.resolve(opt('--target') || process.env.WEBSITE_DIR || '../we
 const PROJECTS_DIR = path.join(TARGET, 'public/assets/projects');
 const STATE_FILE = path.join(TARGET, '.sync/state.json');
 const SETTINGS = { widths: WIDTHS, webpQuality: 82, jxlQuality: 80, jxlEffort: 4, v: 1 };
-const PROMPT_VERSION = 1;
 const SKIP_DIRS = new Set(['node_modules', 'scripts', 'tests', 'docs']);
 
 const log = (...a) => console.log(...a);
@@ -36,11 +35,6 @@ const ConfigSchema = z.object({
   separator: z.string().default(' / '),
   showCamera: z.boolean().default(true),
   showLens: z.boolean().default(true),
-  altText: z.object({
-    mode: z.enum(['off', 'missing-only']).default('off'),
-    model: z.string().default('claude-haiku-5-5'),
-    maxChars: z.number().int().min(20).max(300).default(125)
-  }).default({}),
   limits: z.object({ concurrency: z.number().int().min(1).max(4).default(2) }).passthrough().default({})
 });
 
@@ -52,7 +46,7 @@ try {
   console.error(`config.json invalid: ${msg}`); process.exit(1);
 }
 
-const warnings = [], errors = [], summary = { added: [], updated: [], removed: [], skipped: [], review: [], aiFailed: [] };
+const warnings = [], errors = [], summary = { added: [], updated: [], removed: [], skipped: [] };
 
 // ---------- state ----------
 let state = { version: 1, settings: SETTINGS, projects: {} };
@@ -113,12 +107,10 @@ for (const slug of slugsOnDisk) {
 const guard = deletionGuard({ existing: existingExports, toDelete: removals.length, imageCount, force: FORCE });
 if (guard) { console.error('GUARD:', guard); await finish(1); }
 
-log(`Plan: ${plan.filter(x => x.action === 'add').length} add, ${plan.filter(x => x.action === 'update').length} update, ${plan.filter(x => x.action === 'keep').length} unchanged, ${removals.length} export files to remove. AI alt: ${cfg.altText.mode}.`);
+log(`Plan: ${plan.filter(x => x.action === 'add').length} add, ${plan.filter(x => x.action === 'update').length} update, ${plan.filter(x => x.action === 'keep').length} unchanged, ${removals.length} export files to remove.`);
 if (DRY) {
   for (const x of plan) if (x.action !== 'keep') log(`  ${x.action} ${x.slug}/${x.file}`);
   for (const r of removals) log(`  remove ${path.relative(TARGET, r.path)}`);
-  const need = plan.filter(x => !state.projects[x.slug]?.[x.stem]?.alt?.hash || false).length;
-  log(`  Anthropic API calls: ${cfg.altText.mode === 'off' ? 0 : 'up to ' + plan.length + ' (only images with no meta alt and no cached AI alt)'}`);
   log('Dry run: nothing changed.'); await exiftool.end(); process.exit(0);
 }
 
@@ -166,31 +158,6 @@ await Promise.all(plan.filter(x => x.action !== 'keep').map(x => limit(async () 
 })));
 for (const r of removals) { await rm(r.path, { force: true }); summary.removed.push(path.relative(TARGET, r.path)); }
 
-// ---------- AI alt (optional, fail-soft) ----------
-const ALT_PROMPT = 'Write alt text for this photo: one plain sentence under 125 characters describing what is visible (subject, setting, notable colours or light). Do not start with "image of" or "photo of". Do not guess names, ages, ethnicity or emotions. Never identify people from their face. Only read text that is obviously legible. Reply with the sentence only.';
-async function aiAlt(x, rec) {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new Error('ANTHROPIC_API_KEY not set');
-  const w = rec.sizes.includes(1200) ? 1200 : rec.sizes[rec.sizes.length - 1];
-  const img = await readFile(path.join(x.outDir, `${x.stem}-${w}.webp`));
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: cfg.altText.model, max_tokens: 200, messages: [{ role: 'user', content: [
-        { type: 'image', source: { type: 'base64', media_type: 'image/webp', data: img.toString('base64') } },
-        { type: 'text', text: ALT_PROMPT }] }] })
-    });
-    if (res.status === 429 || res.status >= 500) { await new Promise(r => setTimeout(r, 1000 * 2 ** attempt)); continue; }
-    if (!res.ok) throw new Error(`API status ${res.status}`);
-    const j = await res.json();
-    const t = cleanAlt((j.content || []).filter(c => c.type === 'text').map(c => c.text).join(' '), cfg.altText.maxChars);
-    if (!t) throw new Error('empty response');
-    return t;
-  }
-  throw new Error('API unavailable after retries');
-}
-
 // ---------- merge state + manifest ----------
 const newState = { version: 1, settings: SETTINGS, projects: {} };
 const manifest = [];
@@ -201,28 +168,19 @@ for (const p of scan) {
     const rec = results[p.slug]?.[x.stem] ?? state.projects[p.slug]?.[x.stem];
     if (!rec || rec.skipped) { (newState.projects[p.slug] ??= {})[x.stem] = { sha256: x.hash, skipped: true }; continue; }
     const o = ov.get(x.stem) || {};
-    // AI alt: only when meta has no alt; cached per source hash + prompt version
-    const prevAi = rec.ai ?? state.projects[p.slug]?.[x.stem]?.ai;
-    let ai = prevAi && prevAi.sha256 === x.hash && prevAi.promptVersion === PROMPT_VERSION && prevAi.model === cfg.altText.model ? prevAi : undefined;
-    if (cfg.altText.mode === 'missing-only' && o.alt === undefined && !ai) {
-      try {
-        const text = await aiAlt(x, rec);
-        ai = { text, sha256: x.hash, promptVersion: PROMPT_VERSION, model: cfg.altText.model, date: new Date().toISOString().slice(0, 10) };
-        summary.review.push(`${p.slug}/${x.stem}: ${text}`);
-      } catch (e) { summary.aiFailed.push(`${p.slug}/${x.stem}: ${e.message}`); }
-    }
-    const useAi = cfg.altText.mode === 'missing-only' ? ai?.text : undefined;
-    const { alt, altSource } = resolveAlt(o, useAi);
+    // Alt text is human-written in meta.json only ("" marks an image decorative on purpose).
+    const alt = o.alt ?? '';
     const caption = resolveCaption(o, rec.exif, cfg);
     const img = {
       file: x.stem, title: o.title ?? x.stem, date: o.date ?? p.meta.date ?? '',
       width: rec.width, height: rec.height, sizes: rec.sizes, alt, caption, credit: o.credit ?? '',
       order: o.order ?? 999, jxlSizes: rec.jxlSizes, jxl: rec.jxlSizes.length > 0, jpg: false
     };
-    if (altSource) img.altSource = altSource;
     if (rec.exif && Object.keys(rec.exif).length) img.exif = rec.exif;
     images.push(img);
-    (newState.projects[p.slug] ??= {})[x.stem] = { ...rec, ...(ai ? { ai } : {}) };
+    const recOut = { ...rec };
+    delete recOut.ai; // drop any legacy AI-alt cache entries from older state files
+    (newState.projects[p.slug] ??= {})[x.stem] = recOut;
   }
   images.sort((a, b) => a.order - b.order || a.file.localeCompare(b.file, undefined, { numeric: true }));
   manifest.push({ order: p.meta.order ?? 999, slug: p.slug, project: p.meta.project ?? p.slug, date: p.meta.date ?? '', images });
@@ -235,8 +193,6 @@ await mkdir(path.dirname(STATE_FILE), { recursive: true });
 const manifestPath = path.join(PROJECTS_DIR, 'manifest.json');
 if (!(await exists(manifestPath)) || (await readFile(manifestPath, 'utf8')) !== manifestText) await writeFile(manifestPath, manifestText);
 if (!(await exists(STATE_FILE)) || (await readFile(STATE_FILE, 'utf8')) !== stateText) await writeFile(STATE_FILE, stateText);
-// drop empty project dirs for removed projects
-for (const slug of slugsOnDisk) if (!scan.find(p => p.slug === slug)) { const d = path.join(PROJECTS_DIR, slug, 'web'); if (await exists(d) && !(await readdir(d)).filter(f => /-(600|1200|2400)\.(webp|jxl)$/.test(f)).length) { /* meta/other files stay: generated-only dir */ } }
 await finish(0);
 
 async function finish(code) {
@@ -245,8 +201,6 @@ async function finish(code) {
   if (summary.skipped.length) lines.push('### Skipped', ...summary.skipped.map(s => `- ${s}`), '');
   if (warnings.length) lines.push('### Warnings', ...warnings.map(s => `- ${s}`), '');
   if (errors.length) lines.push('### Errors', ...errors.map(s => `- ${s}`), '');
-  if (summary.review.length) lines.push('### Review needed (new AI alt text)', '| Image | Alt |', '|---|---|', ...summary.review.map(s => { const i = s.indexOf(': '); return `| ${s.slice(0, i)} | ${s.slice(i + 2)} |`; }), '');
-  if (summary.aiFailed.length) lines.push('### AI alt failed (shipped without alt)', ...summary.aiFailed.map(s => `- ${s}`), '');
   console.log(lines.join('\n'));
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
   await exiftool.end();
