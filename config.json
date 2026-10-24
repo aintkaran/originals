@@ -1,0 +1,8 @@
+{
+  "captionTemplate": "{focal} / f/{aperture} / {shutter} / ISO {iso}",
+  "separator": " / ",
+  "showCamera": true,
+  "showLens": true,
+  "altText": { "mode": "off", "model": "claude-haiku-5-5", "maxChars": 125 },
+  "limits": { "maxDeleteFraction": 0.25, "concurrency": 2 }
+}

@@ -1,0 +1,2 @@
+# Tests
+`npm test` runs `tests/lib.test.mjs` (caption formatter, name validators, meta precedence, deletion guard, EXIF whitelist) and `tests/e2e.test.mjs`, which builds fixtures (JPEG with EXIF and GPS, PNG, a Display P3 image, a 1000 px image, an EXIF-orientation-6 portrait, a 300 px image) and checks: only 600 px made for the 1000 px file, tiny files skipped, no EXIF/GPS in outputs, manifest or state, a second run changes nothing, a meta.json-only edit does not touch images, deleting a source removes its exports, and an empty originals folder aborts.

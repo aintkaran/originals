@@ -1,0 +1,13 @@
+{
+  "project": "Monroe",
+  "images": [
+    { "file": "IMG_0985", "title": "Monroe", "order": 1 },
+    { "file": "IMG_7166", "title": "Monroe", "order": 2 },
+    { "file": "IMG_3084", "title": "Monroe", "order": 3 },
+    { "file": "IMG_3935", "title": "Monroe", "order": 4 },
+    { "file": "IMG_2283", "title": "Monroe", "order": 5 },
+    { "file": "IMG_1448", "title": "Monroe", "order": 6 },
+    { "file": "IMG_6583", "title": "Monroe", "order": 7 },
+    { "file": "IMG_9599", "title": "Monroe", "order": 8 }
+  ]
+}
