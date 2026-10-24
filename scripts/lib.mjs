@@ -137,23 +137,9 @@ export function resolveCaption(o, exif, cfg, exifAllowed = true) {
   return formatCaption(exif, cfg);
 }
 
-// alt: meta alt (even "" = decorative) wins; AI alt only when absent.
-export function resolveAlt(o, aiAlt) {
-  if (o.alt !== undefined) return { alt: o.alt, altSource: undefined };
-  if (aiAlt) return { alt: aiAlt, altSource: 'ai' };
-  return { alt: '', altSource: undefined };
-}
-
 export function deletionGuard({ existing, toDelete, imageCount, force }) {
   if (force) return null;
   if (imageCount === 0) return 'originals has zero images; refusing to wipe the site (use force to override).';
   if (existing > 0 && toDelete / existing > 0.25) return `run would delete ${toDelete} of ${existing} exports (>25%); aborting (use force to override).`;
   return null;
-}
-
-export function cleanAlt(s, max = 125) {
-  let t = String(s || '').replace(/\s+/g, ' ').trim().replace(/^["']|["']$/g, '').replace(/^(an? )?(image|photo|picture|photograph) of /i, '');
-  if (t) t = t[0].toUpperCase() + t.slice(1);
-  if (t.length > max) t = t.slice(0, max - 1).replace(/\s+\S*$/, '') + '.';
-  return t;
 }
