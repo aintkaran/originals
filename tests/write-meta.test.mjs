@@ -46,3 +46,27 @@ test('write-meta preserves human fields and only regenerates exif', async () => 
   assert.match(out3, /malformed/);
   assert.equal(await readFile(path.join(src, 'Q', 'meta.json'), 'utf8'), before);
 });
+
+test('workflow stages new untracked project metadata before checking changes', async () => {
+  const src = await mkdtemp(path.join(os.tmpdir(), 'wm-git-'));
+  const git = (...args) => execFileSync('git', args, { cwd: src, encoding: 'utf8' });
+  git('init', '-q');
+  git('config', 'user.name', 'Test');
+  git('config', 'user.email', 'test@example.invalid');
+  await mkdir(path.join(src, 'Q'));
+  await sharp({ create: { width: 100, height: 100, channels: 3, background: { r: 1, g: 2, b: 3 } } })
+    .png().toFile(path.join(src, 'Q', 'new.png'));
+  git('add', 'Q/new.png');
+  git('commit', '-qm', 'Source photo');
+  await writeFile(path.join(src, 'unrelated.txt'), 'must not be staged');
+  run(src);
+  assert.equal(git('diff', '--quiet'), '', 'plain diff misses newly generated metadata');
+  const workflow = await readFile(path.join(ROOT, '.github/workflows/sync.yml'), 'utf8');
+  const block = workflow.match(/node scripts\/write-meta\.mjs\n([\s\S]*?)git commit -m/)[1];
+  assert.match(block, /git diff --cached --quiet/);
+  // Exercise the exact stage/check lines used in the real workflow.
+  const script = block.replace(/exit 0;/g, 'exit 99;');
+  execFileSync('bash', ['-e', '-c', script], { cwd: src, encoding: 'utf8' });
+  assert.equal(git('diff', '--cached', '--name-only').trim(), 'Q/meta.json');
+  assert.match(git('status', '--porcelain'), /\?\? unrelated.txt/);
+});
