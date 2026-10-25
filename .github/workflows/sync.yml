@@ -99,8 +99,8 @@ jobs:
             git fetch origin main
             git checkout -B main "origin/main"
             node scripts/write-meta.mjs
-            if git diff --quiet; then echo "meta.json already up to date."; exit 0; fi
             git add -- '*/meta.json'
+            if git diff --cached --quiet; then echo "meta.json already up to date."; exit 0; fi
             git commit -m "Update EXIF in meta.json [skip ci]"
             if git push origin HEAD:main; then exit 0; fi
             echo "Push rejected (attempt $attempt); retrying against latest main."
