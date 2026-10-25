@@ -1,3 +1,3 @@
 {
-  "limits": { "maxDeleteFraction": 0.25, "concurrency": 2 }
+  "limits": { "concurrency": 2 }
 }
