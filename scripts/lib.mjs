@@ -1,6 +1,7 @@
 // Pure helpers (unit tested). No I/O.
 export const WIDTHS = [600, 1200, 2400];
 export const IMAGE_EXT_RE = /\.(jpe?g|png|webp|avif|tiff?)$/i;
+// HEIC/HEIF is not supported (owner decision): the sync warns and skips these.
 export const HEIC_EXT_RE = /\.(heic|heif)$/i;
 
 export function lineCol(text, pos) {
@@ -49,8 +50,8 @@ export function validateNames(project, files) {
   const seen = new Map();
   if (/[A-Z ]/.test(project)) warnings.push(`${project}: folder name has spaces/uppercase; kept as the slug.`);
   for (const f of files) {
-    if (!IMAGE_EXT_RE.test(f) && !HEIC_EXT_RE.test(f)) continue;
-    const stem = f.replace(IMAGE_EXT_RE, '').replace(HEIC_EXT_RE, '');
+    if (!IMAGE_EXT_RE.test(f)) continue;
+    const stem = f.replace(IMAGE_EXT_RE, '');
     if (/-(600|1200|2400)$/.test(stem)) errors.push(`${project}/${f}: name ends in -600/-1200/-2400, which is reserved for exports. Rename it.`);
     if (/[#?%]/.test(stem) || /[^\x00-\x7F]/.test(stem)) errors.push(`${project}/${f}: name has #, ?, % or non-ASCII characters. Rename it.`);
     else if (/\s/.test(stem)) warnings.push(`${project}/${f}: name contains spaces (works, but avoid).`);
