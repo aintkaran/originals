@@ -7,6 +7,7 @@ import sharp from 'sharp';
 import pLimit from 'p-limit';
 import { z } from 'zod';
 import encodeJxl, { init as initJxl } from '@jsquash/jxl/encode.js';
+import { exifText } from './exif.mjs';
 import {
   WIDTHS, IMAGE_EXT_RE, parseMeta, metaImageMap, validateNames, deletionGuard
 } from './lib.mjs';
@@ -160,13 +161,17 @@ for (const p of scan) {
     const rec = results[p.slug]?.[x.stem] ?? state.projects[p.slug]?.[x.stem];
     if (!rec || rec.skipped) { (newState.projects[p.slug] ??= {})[x.stem] = { sha256: x.hash, skipped: true }; continue; }
     const o = ov.get(x.stem) || {};
+    // Camera, lens and exposure details from the original, as plain text (see scripts/exif.mjs).
+    // Published in the manifest for crawlers and agents; the page keeps it visually hidden.
+    let exif = '';
+    try { const em = await sharp(x.buf).metadata(); exif = em.exif ? exifText(em.exif) : ''; } catch { /* unreadable: no EXIF */ }
     // Alt text is human-written in meta.json only ("" marks an image decorative on purpose).
     const alt = o.alt ?? '';
-    // Captions are human-written in meta.json only; nothing is read from camera data.
+    // Captions are human-written in meta.json only. EXIF is a separate plain-text field (below), never a caption.
     const caption = o.caption ?? '';
     const img = {
       file: x.stem, title: o.title ?? x.stem, date: o.date ?? p.meta.date ?? '',
-      width: rec.width, height: rec.height, sizes: rec.sizes, alt, caption, credit: o.credit ?? '',
+      width: rec.width, height: rec.height, sizes: rec.sizes, alt, caption, credit: o.credit ?? '', exif,
       order: o.order ?? 999, jxlSizes: rec.jxlSizes, jxl: rec.jxlSizes.length > 0, jpg: false
     };
     images.push(img);
