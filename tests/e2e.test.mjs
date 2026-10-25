@@ -34,7 +34,7 @@ test('pipeline end to end', async () => {
   assert.ok(rotI.width > rotI.height, 'EXIF orientation 6 applied (portrait stored, landscape displayed)');
   const cam = m[0].images.find(i => i.file === 'cam');
   assert.equal(cam.caption, '', 'no camera-data captions: captions are human-written only');
-  assert.ok(!('exif' in cam), 'manifest carries no camera data');
+  assert.equal(cam.exif, '', 'no EXIF in source: empty, never invented');
   assert.equal(m[0].images.find(i => i.file === 'p3').alt, '');
   // outputs carry no camera metadata
   for (const f of files.filter(f => /\.webp$/.test(f))) {
