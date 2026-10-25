@@ -1,8 +1,0 @@
-{
-  "project": "test",
-  "images": [
-    { "file": "IMG_1024", "title": "test","caption": "Placeholder 1, replace me", "credit": "Placeholder", "alt": "Motion-blurred photo of a woman in an orange top and brown skirt walking past green trees and a wooden building, holding a brown hat." },
-    { "file": "IMG_1025", "title": "test","caption": "Placeholder 1, replace me", "credit": "Placeholder", "alt": "Woman with long dark curly hair in a brown jacket riding a white horse in front of green foliage." },
-    { "file": "IMG_1028", "title": "test","caption": "Placeholder 1, replace me", "credit": "Placeholder", "alt": "A white horse galloping across red earth in front of a white fence and dark trees." }
-  ]
-}
