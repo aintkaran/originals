@@ -106,7 +106,11 @@ test('HEIC WebP previews from a real encoded HEIC', async (t) => {
   await mkdir(path.join(src, 'P'));
   const png = path.join(src, 'seed.png');
   await sharp({ create: { width: 1000, height: 700, channels: 3, background: { r: 90, g: 40, b: 160 } } }).png().toFile(png);
-  execFileSync('heif-enc', [png, '-o', path.join(src, 'P', 'real.heic')]);
+  try {
+    execFileSync('heif-enc', [png, '-o', path.join(src, 'P', 'real.heic')], { stdio: 'pipe' });
+  } catch (e) { // e.g. Ubuntu's libheif ships no HEVC encoder: decode path stays tested via heif-convert
+    t.skip(`heif-enc cannot encode here (${String(e.stderr || e.message || 'failed').trim().split('\n').pop()})`); return;
+  }
   await rm(png);
   run(src, tgt);
   const web = path.join(tgt, 'public/assets/projects/P/web');
