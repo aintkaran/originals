@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, readdir, cp } from 'node:fs/pr
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
-import { buildHeic } from './heic-fixture.mjs';
+import { buildHeic, REAL_HEIC_B64 } from './heic-fixture.mjs';
 
 const ROOT = path.resolve('.');
 const run = (src, target, ...extra) => execFileSync('node', [path.join(ROOT, 'scripts/sync.mjs'), '--source', src, '--target', target, ...extra], { cwd: ROOT, encoding: 'utf8' });
@@ -97,30 +97,24 @@ test('HEIC publishes unchanged plus WebP previews; undecodable HEIC degrades gra
   assert.ok(m3[0].images.some(i => i.file === 'cam'), 'other files still publish');
 });
 
-// Real HEIC preview path, exercised when libheif's heif-enc is on PATH (CI installs it).
+// Real HEIC preview (decode) path, exercised where libheif's heif-convert is on PATH (CI
+// installs it). Uses the embedded real HEIC: Ubuntu's libheif decodes but cannot encode.
 import { execFileSync } from 'node:child_process';
 test('HEIC WebP previews from a real encoded HEIC', async (t) => {
-  try { execFileSync('heif-enc', ['--help'], { stdio: 'pipe' }); } catch { t.skip('heif-enc not on PATH'); return; }
+  try { execFileSync('heif-convert', [], { stdio: 'pipe' }); } catch (e) { if (e.code === 'ENOENT') { t.skip('heif-convert not on PATH'); return; } } // any non-ENOENT error = binary present
   const src = await mkdtemp(path.join(os.tmpdir(), 'src-')), tgt = await mkdtemp(path.join(os.tmpdir(), 'tgt-'));
   await cp(path.join(ROOT, 'config.json'), path.join(src, 'config.json'));
   await mkdir(path.join(src, 'P'));
-  const png = path.join(src, 'seed.png');
-  await sharp({ create: { width: 1000, height: 700, channels: 3, background: { r: 90, g: 40, b: 160 } } }).png().toFile(png);
-  try {
-    execFileSync('heif-enc', [png, '-o', path.join(src, 'P', 'real.heic')], { stdio: 'pipe' });
-  } catch (e) { // e.g. Ubuntu's libheif ships no HEVC encoder: decode path stays tested via heif-convert
-    t.skip(`heif-enc cannot encode here (${String(e.stderr || e.message || 'failed').trim().split('\n').pop()})`); return;
-  }
-  await rm(png);
+  await writeFile(path.join(src, 'P', 'real.heic'), Buffer.from(REAL_HEIC_B64, 'base64'));
   run(src, tgt);
   const web = path.join(tgt, 'public/assets/projects/P/web');
   const files = await readdir(web);
-  assert.ok(files.includes('real-600.webp'), '600px WebP preview generated from the HEIC');
+  assert.ok(files.includes('real-64.webp'), 'WebP preview decoded from the real HEIC');
   assert.ok(!files.some(f => f.endsWith('.jxl')), 'HEIC previews are WebP only');
   const m = JSON.parse(await readFile(path.join(tgt, 'public/assets/projects/manifest.json'), 'utf8'));
   const r = m[0].images.find(i => i.file === 'real');
   assert.equal(r.heic, true);
-  assert.deepEqual(r.sizes, [600], 'widths capped at the 1000px source');
-  assert.ok(r.width === 1000 && r.height === 700);
+  assert.deepEqual(r.sizes, [64], 'widths capped at the 64px source');
+  assert.ok(r.width === 64 && r.height === 48);
   assert.ok((await readdir(path.join(tgt, 'public/assets/projects/P/original'))).includes('real.heic'), 'unchanged original also published');
 });
