@@ -10,15 +10,18 @@ Uploading many photos at once makes one run; runs queue, they do not race. A fai
 
 ## Files
 - `<project>/<photo>.png|jpg|jpeg|webp|avif|tif|tiff` - the originals. HEIC/HEIF is rejected with a message: convert to JPEG or TIFF first.
-- `<project>/meta.json` - optional. Fields: `project`, `order`, `date`, and `images`, a list of `{ "file": "<name without extension>", "title", "caption", "credit", "alt", "order" }`. Anything set here always wins. Captions are human-written here; nothing is read from camera data. `"alt": ""` marks an image decorative on purpose. A broken meta.json gives a warning with line and column, and defaults are used.
+- `<project>/meta.json` - optional. Fields: `project`, `order`, `date`, and `images`, a list of `{ "file": "<name without extension>", "title", "caption", "credit", "alt", "order" }`. Anything set here always wins. Captions are human-written here; they are never read from camera data. `"alt": ""` marks an image decorative on purpose. A broken meta.json gives a warning with line and column, and defaults are used.
 - `config.json` - run limits.
-- `scripts/sync.mjs` - the generator. `tests/` - unit and end-to-end tests (`npm test`); the Action runs them before every sync.
+- `scripts/sync.mjs` - the generator. `scripts/exif.mjs` - the dependency-free EXIF reader. `tests/` - unit and end-to-end tests (`npm test`); the Action runs them before every sync.
 
 ## Names
 Rejected: stems ending in `-600`, `-1200`, `-2400`; two files whose names differ only by case or extension; names with `#`, `?`, `%` or non-ASCII. Warned: spaces in file names, spaces/uppercase in the folder name. The folder name is the project slug.
 
 ## What gets generated
 Widths 600/1200/2400, never upscaled (only widths up to the original's width). Originals under 600 px wide are skipped with a warning. Every output is sRGB with all metadata stripped. A JPEG XL failure fails the run.
+
+## EXIF
+Each run reads camera, lens and exposure details (camera, lens, focal length, aperture, shutter, ISO, exposure bias) from the originals and publishes them as one plain-text `exif` string per image in `manifest.json`. The site keeps it visually hidden in the page but it is in the DOM and the manifest for crawlers and agents. It is separate from `caption` and `credit`, which stay human-written. Images with no EXIF get an empty string. GPS, serial numbers, owner/artist/copyright and dates are never read. The exported images themselves stay metadata-free.
 
 ## Alt text
 Human-written only, set per image in `meta.json` (`"alt"`). It is never generated or overwritten. An image with no meta alt ships with an empty alt; `"alt": ""` marks an image decorative on purpose.
