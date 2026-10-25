@@ -2,16 +2,13 @@
 // meta.json in a website checkout.
 // Usage: node scripts/sync.mjs --target ../website3 [--dry-run] [--force]
 import { readdir, readFile, writeFile, mkdir, rm, access, appendFile } from 'node:fs/promises';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import os from 'node:os';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import sharp from 'sharp';
 import pLimit from 'p-limit';
 import { z } from 'zod';
 import encodeJxl, { init as initJxl } from '@jsquash/jxl/encode.js';
-import { exifText, parseExif, extractHeicExif, heicDimensions } from './exif.mjs';
+import { exifText } from './exif.mjs';
 import {
   WIDTHS, IMAGE_EXT_RE, HEIC_EXT_RE, parseMeta, metaImageMap, validateNames, deletionGuard
 } from './lib.mjs';
@@ -32,33 +29,6 @@ const EXPORT_RE = /^(.*)-(\d+)\.(webp|jxl)$/;
 const log = (...a) => console.log(...a);
 const exists = async p => { try { await access(p); return true; } catch { return false; } };
 const sha = buf => createHash('sha256').update(buf).digest('hex');
-const execFileP = promisify(execFile);
-
-// Decodes a HEIC/HEIF still to a PNG buffer with libheif's heif-convert
-// (decoding only - the original file is never altered or replaced). Picks the
-// largest decoded image, which is the primary photo, not the thumbnail.
-async function decodeHeic(buf, label) {
-  const tmp = await mkdir(path.join(os.tmpdir(), `heic-${Date.now()}-${Math.random().toString(36).slice(2)}`), { recursive: true });
-  try {
-    const src = path.join(tmp, 'in.heic');
-    await writeFile(src, buf);
-    await execFileP('heif-convert', [src, path.join(tmp, 'out.png')]);
-    const outs = [];
-    for (const f of await readdir(tmp)) {
-      if (!f.startsWith('out') || !f.endsWith('.png')) continue;
-      const b = await readFile(path.join(tmp, f));
-      const m = await sharp(b).metadata();
-      outs.push({ b, px: (m.width || 0) * (m.height || 0), width: m.width, height: m.height });
-    }
-    if (!outs.length) throw new Error('heif-convert produced no image');
-    outs.sort((a, b2) => b2.px - a.px);
-    return outs[0];
-  } catch (e) {
-    throw new Error(`HEIC preview decode failed for ${label}: ${e.message}`);
-  } finally {
-    await rm(tmp, { recursive: true, force: true });
-  }
-}
 const stable = o => JSON.stringify(o);
 
 const ConfigSchema = z.object({
@@ -104,38 +74,34 @@ for (const slug of projectDirs) {
   const metaText = files.includes('meta.json') ? await readFile(path.join(SRC, slug, 'meta.json'), 'utf8') : null;
   if (metaText == null) warnings.push(`${slug}: no meta.json; using folder and file names.`);
   const pm = parseMeta(metaText, slug); warnings.push(...pm.warnings);
-  const images = files.filter(f => IMAGE_EXT_RE.test(f) || HEIC_EXT_RE.test(f));
+  const images = files.filter(f => IMAGE_EXT_RE.test(f));
+  for (const f of files) if (HEIC_EXT_RE.test(f)) warnings.push(`${slug}/${f}: HEIC/HEIF is not supported; skipped, everything else still publishes. Convert to JPEG to publish it.`);
   scan.push({ slug, files: images, meta: pm.meta });
 }
 if (errors.length) { for (const e of errors) console.error('ERROR', e); await finish(1); }
 const imageCount = scan.reduce((n, p) => n + p.files.length, 0);
 
 // ---------- plan ----------
-const plan = []; // {slug, file, stem, buf, hash, action, heic}
+const plan = []; // {slug, file, stem, buf, hash, action}
 for (const p of scan) {
   for (const f of p.files) {
     const buf = await readFile(path.join(SRC, p.slug, f));
-    const heic = HEIC_EXT_RE.test(f);
-    const stem = f.replace(heic ? HEIC_EXT_RE : IMAGE_EXT_RE, '');
+    const stem = f.replace(IMAGE_EXT_RE, '');
     const hash = sha(buf);
     const prev = state.projects[p.slug]?.[stem];
     const outDir = path.join(PROJECTS_DIR, p.slug, 'web');
-    const origDir = path.join(PROJECTS_DIR, p.slug, 'original');
     let complete = !!prev;
     if (complete && !prev.skipped) {
-      if (prev.heic) {
-        complete = await exists(path.join(origDir, f));
-        if (complete) for (const w of prev.sizes || []) if (!(await exists(path.join(outDir, `${stem}-${w}.webp`)))) complete = false;
-      }
-      else for (const w of prev.sizes || []) if (!(await exists(path.join(outDir, `${stem}-${w}.webp`))) || !(await exists(path.join(outDir, `${stem}-${w}.jxl`)))) complete = false;
+      for (const w of prev.sizes || []) if (!(await exists(path.join(outDir, `${stem}-${w}.webp`))) || !(await exists(path.join(outDir, `${stem}-${w}.jxl`)))) complete = false;
     }
     if (prev?.skipped) complete = true;
     const action = !prev ? 'add' : (prev.sha256 !== hash || settingsChanged || !complete) ? 'update' : 'keep';
-    plan.push({ slug: p.slug, file: f, stem, buf, hash, action, heic, outDir, origDir });
+    plan.push({ slug: p.slug, file: f, stem, buf, hash, action, outDir });
   }
 }
-// removals: anything on disk whose source is gone - stray exports, stray copied
-// originals, and whole project folders that no longer exist in originals.
+// removals: anything on disk whose source is gone - stray exports, legacy copied
+// originals (HEIC support was removed), and whole project folders that no longer
+// exist in originals.
 const wanted = new Set(plan.map(x => `${x.slug}/${x.stem}`));
 const removals = [];
 const slugsOnDisk = (await exists(PROJECTS_DIR)) ? (await readdir(PROJECTS_DIR, { withFileTypes: true })).filter(d => d.isDirectory()).map(d => d.name) : [];
@@ -155,10 +121,7 @@ for (const slug of slugsOnDisk) {
     if (!wanted.has(`${slug}/${m[1]}`)) { removals.push({ path: path.join(dir, f) }); filesToDelete++; }
   }
   const odir = path.join(PROJECTS_DIR, slug, 'original');
-  if (await exists(odir)) for (const f of await readdir(odir)) {
-    const stem = f.replace(HEIC_EXT_RE, '');
-    if (!HEIC_EXT_RE.test(f) || !wanted.has(`${slug}/${stem}`)) { removals.push({ path: path.join(odir, f) }); filesToDelete++; }
-  }
+  if (await exists(odir)) for (const f of await readdir(odir)) { removals.push({ path: path.join(odir, f) }); filesToDelete++; }
 }
 const guard = deletionGuard({ toDelete: filesToDelete, imageCount, force: FORCE });
 if (guard) { console.error('GUARD:', guard); await finish(1); }
@@ -180,33 +143,6 @@ const jxlInit = () => jxlReady ??= (async () => {
 // warning and everything else still publishes. Systemic failures (bad config,
 // unreadable folders, failing tests in CI) still stop the whole run.
 async function generate(x) {
-  if (x.heic) {
-    // The HEIC/HEIF original is copied unchanged; WebP previews are decoded
-    // from it for browsers that cannot display HEIC (Chrome, Firefox).
-    await mkdir(x.origDir, { recursive: true });
-    await writeFile(path.join(x.origDir, x.file), x.buf);
-    const exifBuf = extractHeicExif(x.buf);
-    const parsed = exifBuf ? parseExif(exifBuf) : null;
-    const dims = heicDimensions(x.buf);
-    let width = parsed?.pixelWidth || dims?.width || null;
-    let height = parsed?.pixelHeight || dims?.height || null;
-    if (width && height && parsed?.orientation >= 5) [width, height] = [height, width];
-    let widths = [];
-    try {
-      const dec = await decodeHeic(x.buf, `${x.slug}/${x.file}`);
-      width = width || dec.width; height = height || dec.height;
-      widths = WIDTHS.filter(w => w <= dec.width);
-      if (!widths.length) widths = [dec.width];
-      await mkdir(x.outDir, { recursive: true });
-      for (const w of widths) {
-        await sharp(dec.b).rotate().resize({ width: w }).webp({ quality: SETTINGS.webpQuality }).toFile(path.join(x.outDir, `${x.stem}-${w}.webp`));
-      }
-    } catch (e) {
-      warnings.push(`${e.message}; the unchanged original still publishes and displays in Safari 17+.`);
-    }
-    if (!width || !height) warnings.push(`${x.slug}/${x.file}: dimensions unreadable; the layout will use a fallback box.`);
-    return { sha256: x.hash, heic: true, original: x.file, width, height, sizes: widths, jxlSizes: [] };
-  }
   const meta = await sharp(x.buf).metadata();
   if (!meta.width) throw new Error('no dimensions');
   await mkdir(x.outDir, { recursive: true });
@@ -264,8 +200,7 @@ for (const p of scan) {
     // the page keeps it visually hidden. Allow-list only: no GPS, serials, people or dates.
     let exif = '';
     try {
-      if (x.heic) { const eb = extractHeicExif(x.buf); exif = eb ? exifText(eb) : ''; }
-      else { const em = await sharp(x.buf).metadata(); exif = em.exif ? exifText(em.exif) : ''; }
+      const em = await sharp(x.buf).metadata(); exif = em.exif ? exifText(em.exif) : '';
     } catch { /* unreadable: no EXIF */ }
     // Alt text is human-written in meta.json only ("" marks an image decorative on purpose).
     const alt = o.alt ?? '';
@@ -276,12 +211,11 @@ for (const p of scan) {
       width: rec.width, height: rec.height, sizes: rec.sizes, alt, caption, credit: o.credit ?? '', exif,
       order: o.order ?? 999, jxlSizes: rec.jxlSizes, jxl: rec.jxlSizes.length > 0, jpg: false
     };
-    if (rec.heic) { img.heic = true; img.original = rec.original; }
     images.push(img);
     publicImages.push({
       file: x.stem, source: x.file, title: img.title, caption, credit: img.credit, alt, order: img.order,
       exif, width: rec.width, height: rec.height,
-      ...(rec.heic ? { heic: true, original: `original/${rec.original}`, webp: rec.sizes.map(w => `web/${x.stem}-${w}.webp`) } : { webp: rec.sizes.map(w => `web/${x.stem}-${w}.webp`), jxl: rec.jxlSizes.map(w => `web/${x.stem}-${w}.jxl`) })
+      webp: rec.sizes.map(w => `web/${x.stem}-${w}.webp`), jxl: rec.jxlSizes.map(w => `web/${x.stem}-${w}.jxl`)
     });
     const recOut = { ...rec };
     delete recOut.ai; // drop any legacy AI-alt cache entries from older state files
