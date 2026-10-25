@@ -4,37 +4,39 @@ The only place photos are dropped. One folder per project: the original files pl
 
 ## Daily workflow
 1. On github.com, open (or create) a project folder here, drag the photos in, commit to `main`.
-2. Wait for the green tick under the Actions tab, then check the site a few minutes later.
+2. Wait for the green tick under the Actions tab. Vercel deploys after a successful sync; how long that takes depends on the run and the deploy, so no fixed timing is promised.
 
 Uploading many photos at once makes one run; runs queue, they do not race. A failed run leaves the site untouched - the red X is in this repo's Actions tab.
 
 ## Files
-- `<project>/<photo>.png|jpg|jpeg|webp|avif|tif|tiff` - the originals. HEIC/HEIF is rejected with a message: convert to JPEG or TIFF first.
-- `<project>/meta.json` - optional. Fields: `project`, `order`, `date`, and `images`, a list of `{ "file": "<name without extension>", "title", "caption", "credit", "alt", "order" }`. Anything set here always wins. Captions are human-written here; they are never read from camera data. `"alt": ""` marks an image decorative on purpose. A broken meta.json gives a warning with line and column, and defaults are used.
+- `<project>/<photo>.png|jpg|jpeg|webp|avif|tif|tiff|heic|heif` - the originals. HEIC/HEIF (iPhone photos, HEVC-encoded) is never converted: the original file is copied to the site unchanged with its metadata in the project's public `meta.json`. Because only Safari 17+ displays HEIC natively, the run also decodes each HEIC with libheif (`heif-convert`) and generates WebP previews for other browsers. Video files are not handled.
+- `<project>/meta.json` - optional to write, always maintained. Fields: `project`, `order`, `date`, and `images`, a list of `{ "file": "<name without extension>", "title", "caption", "credit", "alt", "order" }`. Anything set here always wins. Captions are human-written here; they are never read from camera data. `"alt": ""` marks an image decorative on purpose. A broken meta.json gives a warning with line and column, and defaults are used. After each sync the workflow writes the camera EXIF block into this file (only the generated `exif` field; human fields are never touched) and commits it back with a `[skip ci]` marker so it does not retrigger itself. The write re-reads the latest main before committing, retries if a concurrent edit wins the race, and never force-pushes. A malformed meta.json is left untouched rather than overwritten.
 - `config.json` - run limits.
-- `scripts/sync.mjs` - the generator. `scripts/exif.mjs` - the dependency-free EXIF reader. `tests/` - unit and end-to-end tests (`npm test`); the Action runs them before every sync.
+- `scripts/sync.mjs` - the generator. `scripts/exif.mjs` - the dependency-free EXIF reader (JPEG/TIFF EXIF and HEIC metadata boxes). `scripts/write-meta.mjs` - the EXIF write-back. `tests/` - unit and end-to-end tests (`npm test`); the Action runs them before every sync. The runner installs `libheif-examples` for `heif-convert`.
 
 ## Names
 Rejected: stems ending in `-600`, `-1200`, `-2400`; two files whose names differ only by case or extension; names with `#`, `?`, `%` or non-ASCII. Warned: spaces in file names, spaces/uppercase in the folder name. The folder name is the project slug.
 
 ## What gets generated
-Widths 600/1200/2400, never upscaled (only widths up to the original's width). Originals under 600 px wide are skipped with a warning. Every output is sRGB with all metadata stripped. A JPEG XL failure fails the run.
+Widths 600/1200/2400, capped at each photo's own width; a photo smaller than 600 px ships at its native size instead of being skipped. WebP quality 90, JPEG XL quality 90. Every output is sRGB with all metadata stripped. HEIC/HEIF files keep their original file unchanged; the WebP previews are decoded copies, never replacements. If a HEIC cannot be decoded, the original still publishes with a warning (Safari 17+ can display it). A corrupt or unreadable file is skipped with a warning and everything else still publishes; failing tests or an unreadable project folder stop the whole run before anything is published.
 
 ## EXIF
-Each run reads camera, lens and exposure details (camera, lens, focal length, aperture, shutter, ISO, exposure bias) from the originals and publishes them as one plain-text `exif` string per image in `manifest.json`. The site keeps it visually hidden in the page but it is in the DOM and the manifest for crawlers and agents. It is separate from `caption` and `credit`, which stay human-written. Images with no EXIF get an empty string. GPS, serial numbers, owner/artist/copyright and dates are never read. The exported images themselves stay metadata-free.
+Each run reads camera, lens and exposure details (camera, lens, focal length, aperture, shutter, ISO, exposure bias) from the originals - including from HEIC files, read straight from the file's own metadata box without conversion - and publishes them as one plain-text `exif` string per image in `manifest.json`, in each project's public `meta.json` on the site, and in the `exif` field written back here. The site keeps it visually hidden in the page but it is in the DOM and the manifest for crawlers and agents. It is separate from `caption` and `credit`, which stay human-written. Images with no EXIF get an empty string. GPS, serial numbers, owner/artist/copyright and dates are never read. The exported images themselves stay metadata-free.
 
 ## Alt text
 Human-written only, set per image in `meta.json` (`"alt"`). It is never generated or overwritten. An image with no meta alt ships with an empty alt; `"alt": ""` marks an image decorative on purpose.
 
 ## Safety
 - Sync, not diff: compares full contents with `.sync/state.json` in the site repo (SHA-256 of each source plus the settings used). Rerunning changes nothing.
-- Aborts without pushing if a run would delete more than 25% of existing exports, or if there are zero images. Override only with the `force` input on a manual run.
+- Deleting a project folder here deletes its outputs on the site on the next run. One rule guards the edge case: an automatic run never publishes an empty gallery. Emptying the whole site takes a manual run with the `force` input. There is no percentage rule.
+- If the originals folder or a project folder cannot be read, the run aborts and changes nothing: a failed read is never treated as a deletion.
 - `node scripts/sync.mjs --target <site checkout> --dry-run` prints the plan and changes nothing.
+- The repair run is the same sync on a weekly schedule (Wednesdays, off the top of the hour; GitHub schedules run in UTC and can be delayed at busy times) plus the manual Run button. It fills anything missing on the site and removes outputs whose project was deleted here. It cannot restore photos whose source folder is gone from originals; that recovery is git history or re-uploading.
 
 ## Setup checklist
 - Repo visibility is private.
 - Actions secret `WEBSITE3_DEPLOY_KEY` holds the private deploy key (the full multi-line block including BEGIN/END lines and a trailing newline). The matching public key is a deploy key on the site repo with "Allow write access" ticked.
-- Workflow permissions are `contents: read`. The workflow never prints secrets.
+- Workflow permission is `contents: write`, needed for the meta.json EXIF write-back. The workflow never prints secrets.
 - Bot commits use the GitHub no-reply identity. Check that Vercel deployed the first bot commit.
 - Default branch is `main` in both repos. Enable email notifications for failed workflows.
 - Browser uploads are limited to 25 MiB per file; larger files need `git push` (100 MiB hard limit). Avoid Git LFS.
