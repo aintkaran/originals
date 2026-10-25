@@ -49,9 +49,8 @@ export function validateNames(project, files) {
   const seen = new Map();
   if (/[A-Z ]/.test(project)) warnings.push(`${project}: folder name has spaces/uppercase; kept as the slug.`);
   for (const f of files) {
-    if (HEIC_EXT_RE.test(f)) { errors.push(`${project}/${f}: HEIC/HEIF is not supported. Convert to JPEG or TIFF.`); continue; }
-    if (!IMAGE_EXT_RE.test(f)) continue;
-    const stem = f.replace(IMAGE_EXT_RE, '');
+    if (!IMAGE_EXT_RE.test(f) && !HEIC_EXT_RE.test(f)) continue;
+    const stem = f.replace(IMAGE_EXT_RE, '').replace(HEIC_EXT_RE, '');
     if (/-(600|1200|2400)$/.test(stem)) errors.push(`${project}/${f}: name ends in -600/-1200/-2400, which is reserved for exports. Rename it.`);
     if (/[#?%]/.test(stem) || /[^\x00-\x7F]/.test(stem)) errors.push(`${project}/${f}: name has #, ?, % or non-ASCII characters. Rename it.`);
     else if (/\s/.test(stem)) warnings.push(`${project}/${f}: name contains spaces (works, but avoid).`);
@@ -62,9 +61,11 @@ export function validateNames(project, files) {
   return { errors, warnings };
 }
 
-export function deletionGuard({ existing, toDelete, imageCount, force }) {
+// One rule, no fractions: an automatic run never publishes an empty gallery.
+// Emptying the whole site takes a manual run with force. Deleting individual
+// projects (or even most of them) is a normal sync and goes through.
+export function deletionGuard({ toDelete, imageCount, force }) {
   if (force) return null;
-  if (imageCount === 0) return 'originals has zero images; refusing to wipe the site (use force to override).';
-  if (existing > 0 && toDelete / existing > 0.25) return `run would delete ${toDelete} of ${existing} exports (>25%); aborting (use force to override).`;
+  if (imageCount === 0 && toDelete > 0) return `originals has zero images but the site holds ${toDelete} export files; an automatic run never empties the gallery (re-run manually with force to confirm).`;
   return null;
 }
