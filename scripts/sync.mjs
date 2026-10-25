@@ -6,11 +6,9 @@ import path from 'node:path';
 import sharp from 'sharp';
 import pLimit from 'p-limit';
 import { z } from 'zod';
-import { exiftool } from 'exiftool-vendored';
 import encodeJxl, { init as initJxl } from '@jsquash/jxl/encode.js';
 import {
-  WIDTHS, IMAGE_EXT_RE, parseMeta, metaImageMap, validateNames, pickExif,
-  resolveCaption, deletionGuard
+  WIDTHS, IMAGE_EXT_RE, parseMeta, metaImageMap, validateNames, deletionGuard
 } from './lib.mjs';
 
 const args = process.argv.slice(2);
@@ -31,10 +29,6 @@ const sha = buf => createHash('sha256').update(buf).digest('hex');
 const stable = o => JSON.stringify(o);
 
 const ConfigSchema = z.object({
-  captionTemplate: z.string().min(1),
-  separator: z.string().default(' / '),
-  showCamera: z.boolean().default(true),
-  showLens: z.boolean().default(true),
   limits: z.object({ concurrency: z.number().int().min(1).max(4).default(2) }).passthrough().default({})
 });
 
@@ -111,7 +105,7 @@ log(`Plan: ${plan.filter(x => x.action === 'add').length} add, ${plan.filter(x =
 if (DRY) {
   for (const x of plan) if (x.action !== 'keep') log(`  ${x.action} ${x.slug}/${x.file}`);
   for (const r of removals) log(`  remove ${path.relative(TARGET, r.path)}`);
-  log('Dry run: nothing changed.'); await exiftool.end(); process.exit(0);
+  log('Dry run: nothing changed.'); process.exit(0);
 }
 
 // ---------- generate ----------
@@ -143,9 +137,7 @@ async function generate(x) {
   for (const w of WIDTHS.filter(w => !widths.includes(w))) for (const ext of ['webp', 'jxl']) await rm(path.join(x.outDir, `${x.stem}-${w}.${ext}`), { force: true });
   const big = widths[widths.length - 1];
   const { width, height } = await sharp(path.join(x.outDir, `${x.stem}-${big}.webp`)).metadata();
-  let exif = {};
-  try { exif = pickExif(await exiftool.read(path.join(SRC, x.slug, x.file))); } catch { warnings.push(`${x.slug}/${x.file}: metadata unreadable; no auto-caption.`); }
-  return { sha256: x.hash, width, height, sizes: widths, jxlSizes: widths, exif };
+  return { sha256: x.hash, width, height, sizes: widths, jxlSizes: widths };
 }
 
 const limit = pLimit(cfg.limits.concurrency);
@@ -170,16 +162,17 @@ for (const p of scan) {
     const o = ov.get(x.stem) || {};
     // Alt text is human-written in meta.json only ("" marks an image decorative on purpose).
     const alt = o.alt ?? '';
-    const caption = resolveCaption(o, rec.exif, cfg);
+    // Captions are human-written in meta.json only; nothing is read from camera data.
+    const caption = o.caption ?? '';
     const img = {
       file: x.stem, title: o.title ?? x.stem, date: o.date ?? p.meta.date ?? '',
       width: rec.width, height: rec.height, sizes: rec.sizes, alt, caption, credit: o.credit ?? '',
       order: o.order ?? 999, jxlSizes: rec.jxlSizes, jxl: rec.jxlSizes.length > 0, jpg: false
     };
-    if (rec.exif && Object.keys(rec.exif).length) img.exif = rec.exif;
     images.push(img);
     const recOut = { ...rec };
     delete recOut.ai; // drop any legacy AI-alt cache entries from older state files
+    delete recOut.exif; // drop legacy camera-data cache; captions are human-written only now
     (newState.projects[p.slug] ??= {})[x.stem] = recOut;
   }
   images.sort((a, b) => a.order - b.order || a.file.localeCompare(b.file, undefined, { numeric: true }));
@@ -203,6 +196,5 @@ async function finish(code) {
   if (errors.length) lines.push('### Errors', ...errors.map(s => `- ${s}`), '');
   console.log(lines.join('\n'));
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
-  await exiftool.end();
   process.exit(code);
 }
