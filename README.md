@@ -10,8 +10,8 @@ Uploading many photos at once makes one run; runs queue, they do not race. A fai
 
 ## Files
 - `<project>/<photo>.png|jpg|jpeg|webp|avif|tif|tiff` - the originals. HEIC/HEIF is rejected with a message: convert to JPEG or TIFF first.
-- `<project>/meta.json` - optional. Fields: `project`, `order`, `date`, and `images`, a list of `{ "file": "<name without extension>", "title", "caption", "credit", "alt", "order", "exif" }`. Anything set here always wins. `"alt": ""` marks an image decorative on purpose. `"exif": false` turns off the auto-caption for that image. A broken meta.json gives a warning with line and column, and defaults are used.
-- `config.json` - caption template, separator, camera/lens toggles, run limits.
+- `<project>/meta.json` - optional. Fields: `project`, `order`, `date`, and `images`, a list of `{ "file": "<name without extension>", "title", "caption", "credit", "alt", "order" }`. Anything set here always wins. Captions are human-written here; nothing is read from camera data. `"alt": ""` marks an image decorative on purpose. A broken meta.json gives a warning with line and column, and defaults are used.
+- `config.json` - run limits.
 - `scripts/sync.mjs` - the generator. `tests/` - unit and end-to-end tests (`npm test`); the Action runs them before every sync.
 
 ## Names
@@ -19,9 +19,6 @@ Rejected: stems ending in `-600`, `-1200`, `-2400`; two files whose names differ
 
 ## What gets generated
 Widths 600/1200/2400, never upscaled (only widths up to the original's width). Originals under 600 px wide are skipped with a warning. Every output is sRGB with all metadata stripped. A JPEG XL failure fails the run.
-
-## Captions from camera data
-Read from the original, whitelist only: Make, Model, LensModel, FocalLength, FocalLengthIn35mmFormat, FNumber, ExposureTime, ISO, DateTimeOriginal. GPS, serial numbers, owner names and everything else are never written anywhere. Default caption: `{focal} / f/{aperture} / {shutter} / ISO {iso}`. Precedence: `meta.json` caption, then auto caption, then empty. PNG exports from Photos or Lightroom usually carry no camera data; upload the JPEG, TIFF or DNG-derived file if you want captions.
 
 ## Alt text
 Human-written only, set per image in `meta.json` (`"alt"`). It is never generated or overwritten. An image with no meta alt ships with an empty alt; `"alt": ""` marks an image decorative on purpose.
@@ -34,7 +31,7 @@ Human-written only, set per image in `meta.json` (`"alt"`). It is never generate
 ## Setup checklist
 - Repo visibility is private.
 - Actions secret `WEBSITE3_DEPLOY_KEY` holds the private deploy key (the full multi-line block including BEGIN/END lines and a trailing newline). The matching public key is a deploy key on the site repo with "Allow write access" ticked.
-- Workflow permissions are `contents: read`. The workflow never prints secrets or camera data.
+- Workflow permissions are `contents: read`. The workflow never prints secrets.
 - Bot commits use the GitHub no-reply identity. Check that Vercel deployed the first bot commit.
 - Default branch is `main` in both repos. Enable email notifications for failed workflows.
 - Browser uploads are limited to 25 MiB per file; larger files need `git push` (100 MiB hard limit). Avoid Git LFS.
