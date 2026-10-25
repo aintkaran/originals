@@ -1,7 +1,3 @@
 {
-  "captionTemplate": "{focal} / f/{aperture} / {shutter} / ISO {iso}",
-  "separator": " / ",
-  "showCamera": true,
-  "showLens": true,
   "limits": { "maxDeleteFraction": 0.25, "concurrency": 2 }
 }
