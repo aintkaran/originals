@@ -27,8 +27,8 @@ function readIfd(b, le, off, wanted) {
   return out;
 }
 
-const IFD0 = new Set([0x010f, 0x0110, 0x8769]);
-const EXIF = new Set([0x829a, 0x829d, 0x8827, 0x9204, 0x920a, 0xa405, 0xa433, 0xa434]);
+const IFD0 = new Set([0x010f, 0x0110, 0x0112, 0x8769]);
+const EXIF = new Set([0x829a, 0x829d, 0x8827, 0x9204, 0x920a, 0xa002, 0xa003, 0xa405, 0xa433, 0xa434]);
 const clean = s => (typeof s === 'string' ? s.replace(/[^\x20-\x7E]/g, '').trim() : '');
 
 export function parseExif(input) {
@@ -45,7 +45,8 @@ export function parseExif(input) {
       make: clean(ifd0[0x010f]), model: clean(ifd0[0x0110]),
       lensMake: clean(ex[0xa433]), lensModel: clean(ex[0xa434]),
       exposureTime: ex[0x829a], fNumber: ex[0x829d], iso: ex[0x8827],
-      focalLength: ex[0x920a], focalLength35: ex[0xa405], exposureBias: ex[0x9204]
+      focalLength: ex[0x920a], focalLength35: ex[0xa405], exposureBias: ex[0x9204],
+      orientation: ifd0[0x0112] || 1, pixelWidth: ex[0xa002], pixelHeight: ex[0xa003]
     };
   } catch { return null; }
 }
@@ -67,3 +68,89 @@ export function formatExif(x) {
 }
 
 export const exifText = buf => formatExif(parseExif(buf));
+
+// ---- HEIC/HEIF: pull the EXIF block and pixel size out of the ISOBMFF box
+// structure so iPhone photos keep their camera data without conversion.
+// Reads only what the allow-list above reads; GPS/serial/etc. stay untouched.
+
+const CONTAINERS = new Set(['meta', 'iinf', 'iprp', 'ipco']);
+const FULL_BOX = new Set(['meta', 'iinf', 'iloc', 'ispe', 'infe']); // 4 bytes of version/flags before the payload
+
+// Walks the box tree, calling cb(type, payloadStart, payloadLen, depth).
+function walkBoxes(b, start, end, depth, cb) {
+  let o = start;
+  while (o + 8 <= end) {
+    let size = b.readUInt32BE(o);
+    const type = b.toString('latin1', o + 4, o + 8);
+    let head = 8;
+    if (size === 1) { if (o + 16 > end) return; size = Number(b.readBigUInt64BE(o + 8)); head = 16; }
+    else if (size === 0) size = end - o;
+    if (size < head || o + size > end) return;
+    let p = o + head;
+    if (FULL_BOX.has(type)) p += 4;
+    cb(type, o, p, o + size, depth);
+    if (CONTAINERS.has(type)) {
+      // iinf carries a 2-byte (v0) or 4-byte (v3) entry count before its infe children.
+      const childStart = type === 'iinf' ? p + (b[o + 8] === 0 ? 2 : 4) : p;
+      walkBoxes(b, childStart, o + size, depth + 1, cb);
+    }
+    o += size;
+  }
+}
+
+// Finds the first 'Exif' item via iinf (item type) + iloc (extent offset/length).
+// construction_method 0 (file offset) only, which is how camera HEIC is written.
+export function extractHeicExif(buf) {
+  const b = Buffer.from(buf);
+  const exifIds = new Map(); // item_ID -> true for infe entries typed 'Exif'
+  const locs = new Map();    // item_ID -> {offset, length}
+  walkBoxes(b, 0, b.length, 0, (type, boxStart, payload, boxEnd) => {
+    if (type === 'infe') {
+      const ver = b[boxStart + 8];
+      // version 2/3 carry item_type; ID is 2 bytes (v2) or 4 bytes (v3)
+      const id = ver === 2 ? b.readUInt16BE(payload) : b.readUInt32BE(payload);
+      const tOff = ver === 2 ? payload + 4 : payload + 6;
+      if (b.toString('latin1', tOff, tOff + 4) === 'Exif') exifIds.set(id, true);
+    } else if (type === 'iloc') {
+      const ver = b[boxStart + 8];
+      const s = b[payload]; // offset_size<<4 | length_size
+      const offSize = s >> 4, lenSize = s & 15, baseSize = b[payload + 1] >> 4;
+      const cnt = ver < 2 ? b.readUInt16BE(payload + 2) : b.readUInt32BE(payload + 2);
+      let o = payload + (ver < 2 ? 4 : 6);
+      for (let i = 0; i < cnt; i++) {
+        const id = ver < 2 ? b.readUInt16BE(o) : b.readUInt32BE(o);
+        o += ver < 2 ? 2 : 4;
+        if (ver === 1 || ver === 2) { const cm = b.readUInt16BE(o) & 15; o += 2; if (cm !== 0) return; }
+        o += 2; // data_reference_index
+        let base = 0; for (let k = 0; k < baseSize; k++) base = base * 256 + b[o + k]; o += baseSize;
+        const nExt = b.readUInt16BE(o); o += 2;
+        for (let j = 0; j < nExt; j++) {
+          if ((ver === 1 || ver === 2) && (b[payload + 1] & 15) > 0) o += (b[payload + 1] & 15); // extent_index
+          let off = 0; for (let k = 0; k < offSize; k++) off = off * 256 + b[o + k]; o += offSize;
+          let len = 0; for (let k = 0; k < lenSize; k++) len = len * 256 + b[o + k]; o += lenSize;
+          if (!locs.has(id)) locs.set(id, { offset: base + off, length: len });
+        }
+      }
+    }
+  });
+  for (const id of exifIds.keys()) {
+    const l = locs.get(id);
+    if (!l || l.offset + l.length > b.length || l.length < 6) continue;
+    // The Exif item starts with a 4-byte offset to the TIFF header (usually 0).
+    const skip = 4 + b.readUInt32BE(l.offset);
+    const tiff = b.subarray(l.offset + skip, l.offset + l.length);
+    const bo = tiff.toString('latin1', 0, 2);
+    if (bo === 'II' || bo === 'MM') return tiff;
+  }
+  return null;
+}
+
+// Pixel dimensions from the first ispe box (width, height as uint32).
+export function heicDimensions(buf) {
+  const b = Buffer.from(buf);
+  let dims = null;
+  walkBoxes(b, 0, b.length, 0, (type, boxStart, payload) => {
+    if (type === 'ispe' && !dims && payload + 8 <= b.length) dims = { width: b.readUInt32BE(payload), height: b.readUInt32BE(payload + 4) };
+  });
+  return dims;
+}
