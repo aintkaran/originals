@@ -106,7 +106,8 @@ test('HEIC WebP previews from a real encoded HEIC', async (t) => {
   await cp(path.join(ROOT, 'config.json'), path.join(src, 'config.json'));
   await mkdir(path.join(src, 'P'));
   await writeFile(path.join(src, 'P', 'real.heic'), Buffer.from(REAL_HEIC_B64, 'base64'));
-  run(src, tgt);
+  const out = run(src, tgt);
+  console.log(out); // sync warnings (e.g. decode errors) stay visible in CI logs
   const web = path.join(tgt, 'public/assets/projects/P/web');
   const files = await readdir(web);
   assert.ok(files.includes('real-64.webp'), 'WebP preview decoded from the real HEIC');
