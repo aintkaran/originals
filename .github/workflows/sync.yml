@@ -17,6 +17,10 @@ on:
       - '**.TIF'
       - '**.tiff'
       - '**.TIFF'
+      - '**.heic'
+      - '**.HEIC'
+      - '**.heif'
+      - '**.HEIF'
       - '**/meta.json'
       - 'config.json'
       - 'scripts/**'
@@ -24,14 +28,21 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/sync.yml'
+  # The repair run: same sync, on a schedule, plus the manual Run button.
+  # originals is the source of truth and website3 is derived output, so this
+  # fills in anything missing there and removes outputs whose project was
+  # deleted here on purpose. It never publishes an empty gallery; that takes
+  # a manual run with force.
+  schedule:
+    - cron: '17 3 * * 3'
   workflow_dispatch:
     inputs:
       force:
-        description: 'Override the deletion guard and regenerate'
+        description: 'Override the empty-gallery guard and regenerate'
         type: boolean
         default: false
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: sync
   cancel-in-progress: false
@@ -58,6 +69,8 @@ jobs:
       - name: Install
         working-directory: originals
         run: npm ci
+      - name: Install HEIC decoder (heif-convert, for WebP previews only)
+        run: sudo apt-get update && sudo apt-get install -y libheif-examples
       - name: Test
         working-directory: originals
         run: npm test
@@ -79,3 +92,25 @@ jobs:
           git commit -F ../commit-msg.txt
           git pull --rebase origin main
           git push origin HEAD:main
+      - name: Write EXIF back into meta.json
+        working-directory: originals
+        run: |
+          git config user.name "aintkaran"
+          git config user.email "157907182+aintkaran@users.noreply.github.com"
+          # Always work from the latest main: a human edit can land while this
+          # run is in flight. The merge below only regenerates the EXIF field,
+          # so human edits are preserved; a rejected push retries against the
+          # newest head; nothing is ever force-pushed.
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git checkout -B main "origin/main"
+            node scripts/write-meta.mjs
+            if git diff --quiet; then echo "meta.json already up to date."; exit 0; fi
+            git add -- '*/meta.json'
+            git commit -m "Update EXIF in meta.json [skip ci]"
+            if git push origin HEAD:main; then exit 0; fi
+            echo "Push rejected (attempt $attempt); retrying against latest main."
+            sleep 5
+          done
+          echo "Could not push meta.json updates after 3 attempts."
+          exit 1
