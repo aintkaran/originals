@@ -7,8 +7,8 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
-import { exifText, extractHeicExif } from './exif.mjs';
-import { IMAGE_EXT_RE, HEIC_EXT_RE, parseMeta, metaImageMap } from './lib.mjs';
+import { exifText } from './exif.mjs';
+import { IMAGE_EXT_RE, parseMeta, metaImageMap } from './lib.mjs';
 
 const args = process.argv.slice(2);
 const opt = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
@@ -23,7 +23,7 @@ const dirs = (await readdir(SRC, { withFileTypes: true }))
 
 for (const slug of dirs) {
   const dir = path.join(SRC, slug);
-  const files = (await readdir(dir)).filter(f => IMAGE_EXT_RE.test(f) || HEIC_EXT_RE.test(f)).sort();
+  const files = (await readdir(dir)).filter(f => IMAGE_EXT_RE.test(f)).sort();
   if (!files.length) continue;
 
   const metaPath = path.join(dir, 'meta.json');
@@ -35,13 +35,11 @@ for (const slug of dirs) {
   const existing = metaImageMap(meta); // file stem -> human entry (preserved)
   const images = [];
   for (const f of files) {
-    const heic = HEIC_EXT_RE.test(f);
-    const stem = f.replace(heic ? HEIC_EXT_RE : IMAGE_EXT_RE, '');
+    const stem = f.replace(IMAGE_EXT_RE, '');
     let exif = '';
     try {
       const buf = await readFile(path.join(dir, f));
-      if (heic) { const eb = extractHeicExif(buf); exif = eb ? exifText(eb) : ''; }
-      else { const em = await sharp(buf).metadata(); exif = em.exif ? exifText(em.exif) : ''; }
+      const em = await sharp(buf).metadata(); exif = em.exif ? exifText(em.exif) : '';
     } catch { exif = ''; }
     const entry = { ...(existing.get(stem) || {}), file: stem };
     delete entry.exif; // regenerated below; everything else stays as the human wrote it
