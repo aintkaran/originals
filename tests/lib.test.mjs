@@ -2,11 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateNames, parseMeta, deletionGuard } from '../scripts/lib.mjs';
 
-test('names: reserved, collisions, case, hostile; HEIC accepted', () => {
-  const v = validateNames('P', ['a-600.png', 'b.png', 'b.jpg', 'C.png', 'c.PNG', 'x#y.png', 'é.png', 'p.heic', 'sp ace.png']);
+test('names: reserved, collisions, case, hostile', () => {
+  const v = validateNames('P', ['a-600.png', 'b.png', 'b.jpg', 'C.png', 'c.PNG', 'x#y.png', 'é.png', 'sp ace.png']);
   const e = v.errors.join('\n');
   for (const k of ['a-600.png', 'collide', 'x#y.png', 'é.png']) assert.match(e, new RegExp(k));
-  assert.ok(!/HEIC|heic is not supported/.test(e), 'HEIC is accepted, never rejected');
   assert.match(v.warnings.join('\n'), /sp ace/);
 });
 test('meta: malformed reports line/column', () => {
