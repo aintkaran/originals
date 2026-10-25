@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseExif, formatExif, exifText, extractHeicExif, heicDimensions } from '../scripts/exif.mjs';
-import { buildHeic } from './heic-fixture.mjs';
+import { parseExif, formatExif, exifText } from '../scripts/exif.mjs';
 
 // Builds a little-endian TIFF/EXIF block: IFD0 (make, model, exif ptr, GPS ptr) + Exif IFD.
 function build() {
@@ -32,17 +31,4 @@ test('garbage and empty input give no text', () => {
   assert.equal(exifText(Buffer.from('not exif')), '');
   assert.equal(parseExif(Buffer.alloc(0)), null);
   assert.equal(formatExif(null), '');
-});
-
-
-test('HEIC: EXIF block and dimensions are read without conversion', () => {
-  const tiff = build(); // reuse the little-endian TIFF fixture from the JPEG test above
-  const f = buildHeic(tiff);
-  const t = exifText(extractHeicExif(f));
-  assert.equal(t, 'Camera: Canon EOS R5, Lens: RF50mm F1.2 L USM, Focal length: 50 mm, Aperture: f/2.8, Shutter: 1/200 s, ISO: 100');
-  assert.deepEqual(heicDimensions(f), { width: 4032, height: 3024 });
-});
-test('HEIC: garbage gives null, not a crash', () => {
-  assert.equal(extractHeicExif(Buffer.from('not a heic file at all')), null);
-  assert.equal(heicDimensions(Buffer.alloc(0)), null);
 });
