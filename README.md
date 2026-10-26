@@ -36,6 +36,15 @@ The gallery starts on `pulse/1-_MG_6955`; other ordering comes from project/imag
 - `node scripts/sync.mjs --target <site checkout> --dry-run` prints the plan and changes nothing.
 - The repair run is the same sync on a weekly schedule (Wednesdays, off the top of the hour; GitHub schedules run in UTC and can be delayed at busy times) at 03:17 UTC (08:47 IST), plus the manual Run button. It fills anything missing on the site and removes outputs whose project was deleted here. It cannot restore photos whose source folder is gone from originals; that recovery is git history or re-uploading.
 
+## Open source libraries
+The sync pipeline (`scripts/sync.mjs`, `scripts/write-meta.mjs`) builds on:
+- **sharp** (Apache-2.0) - image decoding, resizing and WebP encoding. https://github.com/lovell/sharp
+- **@jsquash/jxl** (Apache-2.0) - Wasm JPEG XL encoding, repackaged from Squoosh. https://github.com/jamsinclair/jSquash
+- **zod** (MIT) - schema validation for `meta.json` and `config.json`. https://github.com/colinhacks/zod
+- **p-limit** (MIT) - concurrency limiting during exports. https://github.com/sindresorhus/p-limit
+
+Tests run on Node's built-in `node:test` runner (Node 22), and CI uses the stock `actions/checkout` and `actions/setup-node` actions (MIT). The EXIF reader (`scripts/exif.mjs`) is dependency-free and written for this pipeline. Exact versions are pinned in `package.json` and `package-lock.json`.
+
 ## Setup checklist
 - Node 22 is used in CI. Run `npm ci`, then `npm test` for local checks. `npm run dry-run` plans against the default sibling `../website3`; use an explicit `--target` when needed.
 - Source photos and anything in this repo are visible according to the repo's current access setting. Do not assume originals are private merely because of the repo name.
