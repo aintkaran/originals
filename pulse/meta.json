@@ -1,16 +1,20 @@
 {
   "images": [
     {
-      "file": "1-_MG_6955"
+      "file": "1-_MG_6955",
+      "alt": "A woman with long windblown dark hair riding a white horse past green trees, wearing a brown shirt, wide studded belt and green striped skirt."
     },
     {
-      "file": "2-_F8A8212"
+      "file": "2-_F8A8212",
+      "alt": "Motion-blurred side view of a person in an orange sleeveless top, a white scrunchie and small white flowers in their tied-back hair, against green trees and a white-roofed building."
     },
     {
-      "file": "_MG_6968"
+      "file": "_MG_6968",
+      "alt": "A woman riding a white horse at speed, her hair and the trees behind her streaked with motion blur."
     },
     {
-      "file": "_MG_7004"
+      "file": "_MG_7004",
+      "alt": "A white horse cantering across a dirt riding arena in front of a white-railed fence and dark trees."
     }
   ]
 }
